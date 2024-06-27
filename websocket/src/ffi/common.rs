@@ -39,6 +39,7 @@ pub enum WSStatus {
     UnreachableHost,
     HandShake,
     InvalidFrame,
+    InvalidUrl,
     ConnectionClose,
     DecodingFromUTF8,
     IOError,
@@ -49,6 +50,7 @@ pub fn rust_error_to_c_error(error: WebSocketError) -> WSStatus {
         WebSocketError::UnreachableHost => WSStatus::UnreachableHost,
         WebSocketError::HandShake => WSStatus::HandShake,
         WebSocketError::InvalidFrame => WSStatus::InvalidFrame,
+        WebSocketError::InvalidUrl=> WSStatus::InvalidUrl,
         WebSocketError::ConnectionClose => WSStatus::ConnectionClose,
         WebSocketError::DecodingFromUTF8 => WSStatus::DecodingFromUTF8,
         WebSocketError::IOError => WSStatus::IOError

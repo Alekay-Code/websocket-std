@@ -3,6 +3,7 @@ use super::commons::END_LINE;
 use super::super::core::traits::{Parse, ParseError};
 
 #[allow(dead_code)]
+#[derive(Debug)]
 pub struct Response {
     version: String,
     status_code: u16,

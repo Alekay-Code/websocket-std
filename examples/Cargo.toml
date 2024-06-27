@@ -19,3 +19,6 @@ path = "simple_tls_client.rs"
 
 [dev-dependencies]
 websocket-std = { version = "0.0.6", path = "../websocket" }
+rustls = "0.22.2"
+webpki-roots = "0.26.1"
+regex = "1.10.5"

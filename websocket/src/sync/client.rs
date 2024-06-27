@@ -1,5 +1,5 @@
-use std::net::{TcpStream, Shutdown};
-use std::io::{Write, ErrorKind};
+use std::net::TcpStream as TCP;
+use std::io::{BufReader, ErrorKind, Read, Write};
 use std::collections::{HashMap, VecDeque};
 use std::time::{Instant, Duration};
 use std::format;
@@ -13,9 +13,20 @@ use crate::core::traits::{Serialize, Parse};
 use crate::core::binary::bytes_to_u16;
 use super::super::result::WebSocketResult;
 use crate::http::request::{Request, Method};
+use crate::http::url;
 use crate::http::response::Response;
 use crate::ws_basic::key::{gen_key, verify_key};
 use crate::extension::Extension;
+use std::sync::Arc;
+use super::stream::{Stream, TcpStream, TlsTcpStream};
+
+// TLS
+use rustls::{self};
+use rustls::pki_types::{ServerName, CertificateDer};
+use webpki_roots;
+
+// Read cert
+use std::fs::File;
 
 const DEFAULT_MESSAGE_SIZE: u64 = 1024;
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -57,10 +68,13 @@ enum EventIO {
 }
 
 #[derive(Clone)]
-pub struct Config<'a, T: Clone> {
-    pub callback: Option<fn(&mut WSClient<'a, T>, &WSEvent, Option<T>)>,
+pub struct Config<'ws, T: Clone> {
+    pub callback: Option<fn(&mut WSClient<'ws, T>, &WSEvent, Option<T>)>,
     pub data: Option<T>,
-    pub protocols: Option<&'a[&'a str]>,
+    pub protocols: &'ws[&'ws str],
+    // List of the path of the certificate files to use for TLS for custom certificates
+    // In case of empty list, Mozilla root certificates will be used 
+    pub certs: &'ws[&'ws str]
 }
 
 #[allow(non_camel_case_types)]
@@ -79,34 +93,32 @@ pub enum WSEvent {
 
 #[allow(dead_code)]
 #[repr(C)]
-pub struct WSClient<'a, T: Clone> {
-    host: &'a str,
-    port: u16,
-    path: &'a str,
+pub struct WSClient<'ws, T: Clone> {
+    url: &'ws str,
     connection_status: ConnectionStatus,
     message_size: u64,
     timeout: Duration,
-    stream: Option<TcpStream>,
+    // stream: Option<rustls::StreamOwned<rustls::ClientConnection, TcpStream>>,
+    stream: Option<Box<dyn Stream>>,
     recv_storage: Vec<u8>,                                   // Storage to keep the bytes received from the socket (bytes that didn't use to create a frame)
     recv_data: Vec<u8>,                                      // Store the data received from the Frames until the data is completelly received
     cb_data: Option<T>,
     callback: Option<fn(&mut Self, &WSEvent, Option<T>)>,
     protocol: Option<String>,
-    acceptable_protocols: Option<&'a [&'a str]>,
+    acceptable_protocols: &'ws [&'ws str],
     extensions: Vec<Extension>,
     input_events: VecDeque<Event>,
     output_events: VecDeque<Event>,
     websocket_key: String,
     close_iters: usize,                                      // Count the number of times send_message tries to execute after the close. If <= 1 don't raise error, otherwise raise ConnectionClose error 
+    certs: &'ws[&'ws str]
 }                                                            // The close connection depends on the order of the functions event_loop and is_connected
                         
 
-impl<'a, T> WSClient<'a, T> where T: Clone {
+impl<'ws, T> WSClient<'ws, T> where T: Clone {
     pub fn new() -> Self {
         WSClient { 
-            host: "", 
-            port: 0, 
-            path: "", 
+            url: "",
             connection_status: ConnectionStatus::NOT_INIT, 
             message_size: DEFAULT_MESSAGE_SIZE, 
             stream: None, 
@@ -116,32 +128,37 @@ impl<'a, T> WSClient<'a, T> where T: Clone {
             cb_data: None,
             callback: None,
             protocol: None,
-            acceptable_protocols: None,
+            acceptable_protocols: &[],
             extensions: Vec::new(),
             close_iters: 0,
             input_events: VecDeque::new(),
             output_events: VecDeque::new(),
             websocket_key: String::new(),
+            certs: &[]
         }
     }
 
-    pub fn init(&mut self, host: &'a str, port: u16, path: &'a str, config: Option<Config<'a, T>>) {
-        self.host = host;
-        self.port = port;
-        self.path = path; 
+    pub fn init(&mut self, url: &'ws str, config: Option<Config<'ws, T>>) -> WebSocketResult<()>{
+        if !url::is_valid_ws_url(url) { return Err(WebSocketError::InvalidUrl); }
+        self.url= url;
 
         if let Some(conf) = config {
             self.cb_data = conf.data;
             self.callback = conf.callback;
             self.acceptable_protocols = conf.protocols;
+            self.certs = conf.certs;
         }
 
         self.connection_status = ConnectionStatus::START_INIT;
+
+        Ok(())
     }
 
     fn start_init(&mut self) -> WebSocketResult<()> {
-        let socket = TcpStream::connect(format!("{}:{}", self.host, self.port.to_string()));
+        let (host, port) = url::get_address(self.url);
+        let socket = TCP::connect(format!("{}:{}", host, port));
         if socket.is_err() { return Err(WebSocketError::UnreachableHost)} 
+
         let sec_websocket_key = gen_key();
         
         let mut headers: HashMap<String, String> = HashMap::from([
@@ -150,25 +167,64 @@ impl<'a, T> WSClient<'a, T> where T: Clone {
             (String::from("Sec-WebSocket-Key"), sec_websocket_key.clone()),
             (String::from("Sec-WebSocket-Version"), String::from("13")),
             (String::from("User-agent"), String::from("rust-websocket-std")),
+            (String::from("Host"), host.clone())
         ]);
 
         // Add protocols to request
         let mut protocols_value = String::new();
-        if let Some(protocols) = self.acceptable_protocols {
-            for p in protocols {
-                protocols_value.push_str(p);
-                protocols_value.push_str(", ");
-            }
+        for p in self.acceptable_protocols {
+            protocols_value.push_str(p);
+            protocols_value.push_str(", ");
+        }
+        if self.acceptable_protocols.len() > 0 {
             headers.insert(String::from("Sec-WebSocket-Protocol"), (&(protocols_value)[0..protocols_value.len()-2]).to_string());
         }
-        
-        let request = Request::new(Method::GET, self.path, "HTTP/1.1", Some(headers));
+
+        let path = url::get_path(self.url);
+        let request = Request::new(Method::GET, path, "HTTP/1.1", Some(headers));
         
         self.output_events.push_front(Event::HTTP_REQUEST(request)); // Push front, because the client could execute send before init (store the frames to send to do it later)
         self.websocket_key = sec_websocket_key;
         let socket = socket.unwrap();
         socket.set_nonblocking(true)?;
-        self.stream = Some(socket);
+
+        if url::is_secure(self.url)  {
+            let mut root_store = rustls::RootCertStore::empty();
+            
+            if self.certs.len() > 0 {
+                for file_path in self.certs {
+                    let cert_file = File::open(file_path).unwrap();
+                    let mut buff_reader = BufReader::new(cert_file);
+                    let mut cert = vec![];
+                    buff_reader.read_to_end(&mut cert).unwrap();
+                    root_store.add(CertificateDer::from(cert)).unwrap();
+                }
+            } else {
+                root_store = rustls::RootCertStore {
+                    roots: webpki_roots::TLS_SERVER_ROOTS.iter().cloned().collect()
+                };
+            }
+    
+            let config = rustls::ClientConfig::builder()
+                .with_root_certificates(root_store)
+                .with_no_client_auth();
+    
+            // Allow using SSLKEYLOGFILE
+            // config.key_log = Arc::new(rustls::KeyLogFile::new());
+    
+            let server_name: ServerName = host.try_into().unwrap();
+            let conn = rustls::ClientConnection::new(Arc::new(config), server_name).unwrap();
+            
+            let stream: rustls::StreamOwned<rustls::ClientConnection, TCP> = rustls::StreamOwned::new(conn, socket);
+            let stream = TlsTcpStream::new(stream);
+            self.stream = Some(Box::new(stream));
+
+        } else {
+            let stream = TcpStream::new(socket);
+            self.stream = Some(Box::new(stream));
+        }
+
+
         self.connection_status = ConnectionStatus::HANDSHAKE;
             
         Ok(())
@@ -206,7 +262,7 @@ impl<'a, T> WSClient<'a, T> where T: Clone {
         }
     }
 
-    pub fn event_loop(&mut self) -> WebSocketResult<()> {
+    pub fn event_loop(& mut self) -> WebSocketResult<()> {
         if self.connection_status == ConnectionStatus::NOT_INIT { return Ok(()) }
         if self.connection_status == ConnectionStatus::START_INIT { return self.start_init()}
         if self.connection_status == ConnectionStatus::CLOSE { return Err(WebSocketError::ConnectionClose) }
@@ -361,7 +417,8 @@ impl<'a, T> WSClient<'a, T> where T: Clone {
 
         if sent && kind == FrameKind::Control && self.connection_status == ConnectionStatus::SERVER_WANTS_TO_CLOSE {
             self.connection_status = ConnectionStatus::CLOSE;
-            self.stream.as_mut().unwrap().shutdown(Shutdown::Both)?;
+            self.stream.as_mut().unwrap().shutdown()?;
+
             self.stream = None;
 
             if let Some(callback) = self.callback {
@@ -409,8 +466,8 @@ impl<'a, T> WSClient<'a, T> where T: Clone {
     fn read_bytes_from_socket(&mut self) -> WebSocketResult<Event> {
         // TODO: Add timeout attribute to self in order to raise an error if any op overflow the time required to finish
         let mut buffer = [0u8; 1024];
-        let reader = self.stream.as_mut().unwrap();
-        let bytes_readed = read_into_buffer(reader, &mut buffer)?;
+        let mut reader = self.stream.as_mut().unwrap();
+        let bytes_readed = read_into_buffer(&mut reader, &mut buffer)?;
 
         if bytes_readed > 0 {
             self.recv_storage.extend_from_slice(&buffer[0..bytes_readed]);
@@ -506,7 +563,7 @@ impl<'a, T> WSClient<'a, T> where T: Clone {
                         // Received a response to the client close handshake
                         // Verify the status of close handshake
                         self.connection_status = ConnectionStatus::CLOSE;
-                        self.stream.as_mut().unwrap().shutdown(Shutdown::Both)?;
+                        self.stream.as_mut().unwrap().shutdown()?;
                         
                         if let Some(callback) = self.callback {
                             let reason = Reason::CLIENT_CLOSE(frame.get_status_code().unwrap());
@@ -527,7 +584,7 @@ impl<'a, T> WSClient<'a, T> where T: Clone {
     }
 }
 
-impl<'a, T> Drop for WSClient<'a, T> where T: Clone {
+impl<'ws, T> Drop for WSClient<'ws, T> where T: Clone {
     fn drop(&mut self) {
         if self.connection_status != ConnectionStatus::NOT_INIT &&
             self.connection_status != ConnectionStatus::HANDSHAKE &&
@@ -560,9 +617,9 @@ impl<'a, T> Drop for WSClient<'a, T> where T: Clone {
                     }
         
                     }
-                let _ = self.stream.as_mut().unwrap().shutdown(Shutdown::Both); // Ignore result from shutdown method.
+                let _ = self.stream.as_mut().unwrap().shutdown(); // Ignore result from shutdown method.
             }
         }
 }
 
-unsafe impl<'a, T> Send for WSClient<'a, T> where T: Clone {}
+unsafe impl<'ws, T> Send for WSClient<'ws, T> where T: Clone {}

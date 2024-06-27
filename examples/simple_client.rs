@@ -56,9 +56,7 @@ fn on_close(reason: &Reason, _data: Option<WSData>) {
 }
 
 fn main() -> WebSocketResult<()> {
-    let host: &str = "localhost";
-    let port: u16 = 3000;
-    let path: &str = "/";
+    let url: &str = "ws://localhost:3000";
 
     let mut client = WSClient::<WSData>::new();
     let data = Rc::new(RefCell::new(Data { count: 0 }));
@@ -66,10 +64,11 @@ fn main() -> WebSocketResult<()> {
     let config = Config {
         callback: Some(websocket_handler), 
         data: Some(data.clone()),
-        protocols: Some(&["chat", "superchat"])
+        protocols: &["chat", "superchat"],
+        certs: &[],
     };
 
-    client.init(host, port, path, Some(config));
+    client.init(url, Some(config))?;
     
     let start = time::Instant::now();
     loop {

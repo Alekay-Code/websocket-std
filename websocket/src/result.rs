@@ -10,6 +10,7 @@ pub enum WebSocketError {
     UnreachableHost,
     HandShake,
     InvalidFrame,
+    InvalidUrl,
     ConnectionClose,
     DecodingFromUTF8, 
     IOError,
@@ -32,6 +33,7 @@ impl fmt::Display for WebSocketError {
             WebSocketError::UnreachableHost => fmt.write_str("Unreachable host"),
             WebSocketError::HandShake => fmt.write_str("Error performing initial handshake"),
             WebSocketError::InvalidFrame => fmt.write_str("Invalid frame received"),
+            WebSocketError::InvalidUrl => fmt.write_str("Invalid URL format"),
             WebSocketError::ConnectionClose => fmt.write_str("The connection was closed"),
             WebSocketError::DecodingFromUTF8 => fmt.write_str("Error decoding from utf8"),
             WebSocketError::IOError => fmt.write_str("IOError")

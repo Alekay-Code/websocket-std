@@ -1,4 +1,4 @@
-use websocket_std::sync::tls_client::{Config, WSClient, Reason, WSEvent};
+use websocket_std::sync::client::{Config, WSClient, Reason, WSEvent};
 use websocket_std::result::WebSocketResult;
 use std::time;
 use std::rc::Rc;
@@ -24,6 +24,7 @@ fn on_message(_ws: &mut WebSocket, _msg: &String, data: Option<WSData>) {
     let data = data.unwrap();
     data.borrow_mut().count += 1;
     println!("[SERVER]: {}", _msg);
+    _ws.send("Hello world");
 }
 
 fn on_connect(ws: &mut WebSocket, _msg: &Option<String>, _data: Option<WSData>) {
@@ -56,9 +57,7 @@ fn on_close(reason: &Reason, _data: Option<WSData>) {
 }
 
 fn main() -> WebSocketResult<()> {
-    let host: &str = "localhost";
-    let port: u16 = 3000;
-    let path: &str = "/";
+    let url = "wss://echo.websocket.org/";
 
     let mut client = WSClient::<WSData>::new();
     let data = Rc::new(RefCell::new(Data { count: 0 }));
@@ -66,10 +65,11 @@ fn main() -> WebSocketResult<()> {
     let config = Config {
         callback: Some(websocket_handler), 
         data: Some(data.clone()),
-        protocols: Some(&["chat", "superchat"])
+        protocols: &["chat", "superchat"],
+        certs: &[]
     };
 
-    client.init(host, port, path, Some(config));
+    client.init(url, Some(config))?;
     
     let start = time::Instant::now();
     loop {

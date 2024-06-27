@@ -72,24 +72,17 @@ fn worker(client: &mut WebSocket) {
 }
 
 fn main() -> WebSocketResult<()> {
-    let host: &str = "localhost";
-    let port: u16 = 3000;
-    let path: &str = "/";
-
+    let url = "ws://localhost:3000";
     let data: WSData = Arc::new(Mutex::new(Data { count: 0 }));
 
     let config = Config {
         callback: Some(websocket_handler), 
         data: Some(data.clone()),
-        protocols: Some(&["chat", "superchat"])
+        protocols: &["chat", "superchat"],
+        certs: &[]
     };
     
-    println!(
-        "Connecting to {host}:{port}{path}",
-        host = host,
-        port = port,
-        path = path
-    );
+    println!("Connecting to {}", url);
 
     let mut c1 = WSClient::new();
     let mut c2 = WSClient::new();
@@ -99,8 +92,8 @@ fn main() -> WebSocketResult<()> {
         println!("Accepted protocol: {}", protocol); 
     }
 
-    c1.init(host, port, path, Some(config.clone()));
-    c2.init(host, port, path, Some(config));
+    c1.init(url, Some(config.clone()))?;
+    c2.init(url, Some(config.clone()))?;
 
     let t1 = thread::spawn(move || worker(&mut c1));
     let t2 =thread::spawn(move || worker(&mut c2));

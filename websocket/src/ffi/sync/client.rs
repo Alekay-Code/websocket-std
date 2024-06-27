@@ -28,23 +28,20 @@ extern "C" fn wssclient_new<'a>() -> *mut WSClient<'a, *mut c_void> {
     ptr as *mut WSClient<*mut c_void>
 }
 
+// TODO client init now return ws status
 #[no_mangle]
 unsafe extern "C" fn wssclient_init<'a> (
     client: *mut WSClient<'a, *mut c_void>,
-    host: *const c_char,
-    port: u16,
-    path: *const c_char,
+    url: *const c_char,
     callback: *mut c_void,
 ) {
-    let host = str::from_utf8(CStr::from_ptr(host).to_bytes()).unwrap();
-    let path = str::from_utf8(CStr::from_ptr(path).to_bytes()).unwrap();
-
+    let url = str::from_utf8(CStr::from_ptr(url).to_bytes()).unwrap();
     let callback: fn(&mut WSClient<'a, *mut c_void>, &RWSEvent, Option<*mut c_void>) = mem::transmute(callback);
-    let config = Config { callback: Some(callback), data: None, protocols: None };
+    let config = Config { callback: Some(callback), data: None, protocols: &[], certs: &[] };
     
     let client = &mut *client;
 
-    client.init(host, port, path, Some(config));
+    client.init(url, Some(config));
 }
 
 #[no_mangle]
