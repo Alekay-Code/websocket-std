@@ -1,5 +1,6 @@
+use crate::ffi::common::WSSConfig_t;
 use super::super::super::sync::client::{Config, WSEvent as RWSEvent, WSClient};
-use std::ffi::{c_void, c_char, CStr};
+use std::ffi::{c_char, c_ulong, c_void, CStr};
 use std::alloc::{alloc, Layout};
 use std::mem;
 use std::ptr;
@@ -33,13 +34,30 @@ extern "C" fn wssclient_new<'a>() -> *mut WSClient<'a, *mut c_void> {
 unsafe extern "C" fn wssclient_init<'a> (
     client: *mut WSClient<'a, *mut c_void>,
     url: *const c_char,
-    callback: *mut c_void,
+    config: WSSConfig_t,
 ) {
-    let url = str::from_utf8(CStr::from_ptr(url).to_bytes()).unwrap();
-    let callback: fn(&mut WSClient<'a, *mut c_void>, &RWSEvent, Option<*mut c_void>) = mem::transmute(callback);
-    let config = Config { callback: Some(callback), data: None, protocols: &[], certs: &[] };
-    
     let client = &mut *client;
+
+    let url = str::from_utf8(CStr::from_ptr(url).to_bytes()).unwrap();
+    let len = config.protocols.len;
+
+    println!("Rust protocol len: {}", len);
+
+    let protocols_ref = unsafe { (&*config.protocols.p).as_ptr() };
+    for i in 0..config.protocols.len as usize {
+        let pointer = *protocols_ref.wrapping_add(i);
+        let protocol = str::from_utf8(CStr::from_ptr(pointer).to_bytes()).unwrap();
+        client.add_protocol(protocol);
+    }
+
+    let callback = if !config.callback.is_null() { 
+        let config_callback: fn(&mut WSClient<'a, *mut c_void>, &RWSEvent, Option<*mut c_void>) = mem::transmute(config.callback);
+        Some(config_callback)
+    } else { 
+        None
+    };
+
+    let config = Config { callback, data: None, protocols: &[], certs: &[] };
 
     client.init(url, Some(config));
 }
@@ -69,6 +87,19 @@ unsafe extern "C" fn wssclient_send<'a>(client: *mut WSClient<'a, *mut c_void>, 
 extern "C" fn wssclient_drop<'a>(client: *mut WSClient<'a, *mut c_void>) {
     // Create a box from the raw pointer, at the end of the function the client will be dropped and the memory will be free.
     unsafe {
-        let _c = Box::from_raw(client);
+        let c = *Box::from_raw(client);
+        drop(c); 
+    }
+}
+
+#[no_mangle]
+extern "C" fn wssclient_protocol<'a>(client: *mut WSClient<'a, *mut c_void>) -> *const u8 {
+    unsafe {
+        let client = &mut *client;
+        let protocol = client.protocol();
+        if protocol.is_none() { return ptr::null(); }
+
+        let protocol = protocol.unwrap();
+        protocol.as_ptr()
     }
 }

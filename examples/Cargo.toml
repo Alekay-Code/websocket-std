@@ -17,6 +17,10 @@ path = "simple_client.rs"
 name = "simple_tls_client"
 path = "simple_tls_client.rs"
 
+[[example]]
+name = "cert_bytes"
+path = "cert_bytes.rs"
+
 [dev-dependencies]
 websocket-std = { version = "0.0.6", path = "../websocket" }
 rustls = "0.22.2"

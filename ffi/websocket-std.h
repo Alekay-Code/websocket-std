@@ -42,7 +42,22 @@ typedef struct WSEvent {
 
 typedef struct {} WSSClient_t;
 
+typedef struct {
+  size_t len;
+  char** p;
+} Protocols_t;
+
+#define PROTOCOLS(...) { \
+    .p = (char*[]){__VA_ARGS__}, \
+    .len = sizeof((char*[]){__VA_ARGS__}) / sizeof(char*) \
+}
+
 typedef void (*ws_handler_t)(WSSClient_t*, RustEvent, void*);
+
+typedef struct {
+  ws_handler_t callback;
+  Protocols_t protocols;  
+} WSSConfig_t;
 
 /*
 * Creates a new WSSClient_t or NULL if an error occurred
@@ -55,17 +70,13 @@ WSSClient_t *wssclient_new(void);
 * 
 * Parameters:
 * - WSSClient_t* client
-* - const char* host: Server host
-* - uint16_t port: Server port
-* - const char* path: Server path 
+* - const char* url: Websocket server URL: <ws/wss>://<host>:<port>/<path>
 * - ws_handler_t* callback: Callback to execute when an events comes 
 *
 */
 void wssclient_init(WSSClient_t *client,
-                    const char *host,
-                    uint16_t port,
-                    const char *path,
-                    ws_handler_t callback);               
+                    const char *url,
+                    WSSConfig_t config);               
 
 /*
 * Function to execute the internal event loop of the websocket 
@@ -99,6 +110,16 @@ void wssclient_send(WSSClient_t* client, const char* message);
 *
 */
 void wssclient_drop(WSSClient_t* client);
+
+
+/*
+* Returns the accepted protocol or null if the server didn't accepted any protocol 
+* 
+* Parameters:
+* - WSSClient_t* client
+*
+*/
+char* wssclient_protocol(WSSClient_t* client);
 
 WSEvent_t from_rust_event(RustEvent event);
 

@@ -1,4 +1,4 @@
-#include <websocket-std.h>
+#include "websocket-std.h"
 #include <stdio.h>
 #include <unistd.h>
 #include <string.h>
@@ -10,18 +10,26 @@
 #define TRUE 1 
 
 int total = 0;
+int active = TRUE;
 
 void ws_handler(WSSClient_t* client, RustEvent rs_event, void* data) {
     // This function is required because the rust events are not compatible with C.
     // It will return a WSEvent_t struct compatible with C.
     WSEvent_t event = from_rust_event(rs_event);
     if (event.kind == WSEvent_CONNECT) { 
+        printf("Connected\n");
+        char* protocol = wssclient_protocol(client);
+        if (protocol != NULL) {
+          printf("Accepted protocol: %s\n", protocol);
+        }
+
         if (event.value != NULL) {
             char* msg = (char*) event.value;
             printf("Message received on connected: %s\n", msg);
         }
         wssclient_send(client, "Connection complete");
     } else if (event.kind == WSEvent_CLOSE) {
+        active = FALSE;
         WSReason_t* ws_reason = (WSReason_t*) event.value;
 
         switch (ws_reason->reason) {
@@ -37,7 +45,7 @@ void ws_handler(WSSClient_t* client, RustEvent rs_event, void* data) {
     } else if (event.kind == WSEvent_TEXT) {
         total++; 
         const char* message = (char*) event.value;
-        printf("TEXT (%zu): %s\n", strlen(message), message);
+        // printf("TEXT (%zu): %s\n", strlen(message), message);
         wssclient_send(client, "Hello from C response");
     }
 
@@ -51,7 +59,7 @@ void *handler(void *arg) {
 
     while (TRUE) {
         time(&end);
-        if (difftime(end, start) >= 10) { break; }
+        if (difftime(end, start) >= 10 || !active) { break; }
         WSStatus status = wssclient_loop(client);
        
         if (status != WSStatusOK) { 
@@ -90,10 +98,16 @@ void *handler(void *arg) {
     return NULL;
 }
 
+void print_protocol(WSSConfig_t config) {
+  printf("Number of protocols supported: %zu\n", config.protocols.len);
+}
+
 int main() {
     char cadena[100];
     WSSClient_t *client;
     pthread_t thread;
+
+    const char* url = "ws://localhost:3000";
 
     // Create new websocket
     client = wssclient_new();
@@ -104,14 +118,24 @@ int main() {
     }
 
     // The websocket will be managed by a thread but this is not necessary, just to show
-    // that the websocket is capable os do that.
+    // that the websocket is capable to do that.
     if (pthread_create(&thread, NULL, handler, client) != 0) {
-        fprintf(stderr, "Error al crear el hilo\n");
+        fprintf(stderr, "Error creating the new thread\n");
         return 1;
     }
+    
+    Protocols_t protocols = PROTOCOLS("cchat", "ganar", "llive", "gato");
+
+    // Config
+    WSSConfig_t config = {
+      .callback = ws_handler,
+      .protocols = protocols,
+    };
+
+    print_protocol(config);
 
     // Init connection
-    wssclient_init(client, "localhost", 3000, "/", ws_handler);
+    wssclient_init(client, url, config);
 
     pthread_join(thread, NULL);
 

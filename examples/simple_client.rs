@@ -23,7 +23,8 @@ fn websocket_handler(ws: &mut WebSocket, event: &WSEvent, data: Option<WSData>) 
 fn on_message(_ws: &mut WebSocket, _msg: &String, data: Option<WSData>) {
     let data = data.unwrap();
     data.borrow_mut().count += 1;
-    println!("[SERVER]: {}", _msg);
+    // println!("[SERVER]: {}", _msg);
+    _ws.send("hello world");
 }
 
 fn on_connect(ws: &mut WebSocket, _msg: &Option<String>, _data: Option<WSData>) {
@@ -68,6 +69,7 @@ fn main() -> WebSocketResult<()> {
         certs: &[],
     };
 
+    // client.send("Before init");
     client.init(url, Some(config))?;
     
     let start = time::Instant::now();

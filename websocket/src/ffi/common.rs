@@ -1,5 +1,5 @@
 use super::super::sync::client::{WSEvent as RWSEvent, Reason};
-use std::ffi::{c_void, CString};
+use std::ffi::{c_void, CString, c_char, c_ulong};
 use crate::result::WebSocketError;
 use std::ptr;
 
@@ -43,6 +43,20 @@ pub enum WSStatus {
     ConnectionClose,
     DecodingFromUTF8,
     IOError,
+}
+
+#[repr(C)]
+#[allow(non_camel_case_types)]
+pub struct Protocols_t {
+    pub len: c_ulong,
+    pub p: *const[*const c_char]
+}
+
+#[repr(C)]
+#[allow(non_camel_case_types)]
+pub struct WSSConfig_t {
+    pub callback: *const c_void,
+    pub protocols: Protocols_t
 }
 
 pub fn rust_error_to_c_error(error: WebSocketError) -> WSStatus {

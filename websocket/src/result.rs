@@ -14,6 +14,8 @@ pub enum WebSocketError {
     ConnectionClose,
     DecodingFromUTF8, 
     IOError,
+    // TODO: Add new error for TLS erros
+    // TOOD: Add String msg to errors in order to know what happended
 }
 
 // New Errors:

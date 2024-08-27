@@ -1,6 +1,7 @@
 use std::net::TcpStream as TCP;
 use std::io::{BufReader, ErrorKind, Read, Write};
 use std::collections::{HashMap, VecDeque};
+use std::str::FromStr;
 use std::time::{Instant, Duration};
 use std::format;
 use core::marker::Send;
@@ -21,11 +22,11 @@ use std::sync::Arc;
 use super::stream::{Stream, TcpStream, TlsTcpStream};
 
 // TLS
-use rustls::{self};
-use rustls::pki_types::{ServerName, CertificateDer};
-use webpki_roots;
+use rustls::RootCertStore;
+use rustls::pki_types::{CertificateDer, ServerName};
+use webpki_roots::TLS_SERVER_ROOTS;
 
-// Read cert
+// For reading cert
 use std::fs::File;
 
 const DEFAULT_MESSAGE_SIZE: u64 = 1024;
@@ -105,14 +106,14 @@ pub struct WSClient<'ws, T: Clone> {
     cb_data: Option<T>,
     callback: Option<fn(&mut Self, &WSEvent, Option<T>)>,
     protocol: Option<String>,
-    acceptable_protocols: &'ws [&'ws str],
+    //acceptable_protocols: Vec<String>,
+    acceptable_protocols: Vec<String>,
     extensions: Vec<Extension>,
     input_events: VecDeque<Event>,
     output_events: VecDeque<Event>,
     websocket_key: String,
-    close_iters: usize,                                      // Count the number of times send_message tries to execute after the close. If <= 1 don't raise error, otherwise raise ConnectionClose error 
     certs: &'ws[&'ws str]
-}                                                            // The close connection depends on the order of the functions event_loop and is_connected
+} 
                         
 
 impl<'ws, T> WSClient<'ws, T> where T: Clone {
@@ -128,14 +129,18 @@ impl<'ws, T> WSClient<'ws, T> where T: Clone {
             cb_data: None,
             callback: None,
             protocol: None,
-            acceptable_protocols: &[],
+            acceptable_protocols: Vec::new(),
             extensions: Vec::new(),
-            close_iters: 0,
             input_events: VecDeque::new(),
             output_events: VecDeque::new(),
             websocket_key: String::new(),
             certs: &[]
         }
+    }
+
+    pub fn add_protocol(&mut self, protocol: &str) {
+        let s = String::from(protocol);
+        self.acceptable_protocols.push(s);
     }
 
     pub fn init(&mut self, url: &'ws str, config: Option<Config<'ws, T>>) -> WebSocketResult<()>{
@@ -145,9 +150,15 @@ impl<'ws, T> WSClient<'ws, T> where T: Clone {
         if let Some(conf) = config {
             self.cb_data = conf.data;
             self.callback = conf.callback;
-            self.acceptable_protocols = conf.protocols;
+            
+            for p in conf.protocols {
+                let s = String::from_str(*p).unwrap();
+                self.acceptable_protocols.push(s);
+            }
+
             self.certs = conf.certs;
         }
+
 
         self.connection_status = ConnectionStatus::START_INIT;
 
@@ -172,7 +183,7 @@ impl<'ws, T> WSClient<'ws, T> where T: Clone {
 
         // Add protocols to request
         let mut protocols_value = String::new();
-        for p in self.acceptable_protocols {
+        for p in &self.acceptable_protocols {
             protocols_value.push_str(p);
             protocols_value.push_str(", ");
         }
@@ -189,28 +200,27 @@ impl<'ws, T> WSClient<'ws, T> where T: Clone {
         socket.set_nonblocking(true)?;
 
         if url::is_secure(self.url)  {
-            let mut root_store = rustls::RootCertStore::empty();
-            
+            let mut root_store = RootCertStore::empty();
+let cert = vec![48, 130, 5, 123, 48, 130, 3, 99, 2, 20, 2, 167, 72, 200, 160, 7, 246, 250, 54, 182, 5, 247, 17, 148, 105, 9, 93, 17, 79, 159, 48, 13, 6, 9, 42, 134, 72, 134, 247, 13, 1, 1, 11, 5, 0, 48, 122, 49, 11, 48, 9, 6, 3, 85, 4, 6, 19, 2, 85, 83, 49, 19, 48, 17, 6, 3, 85, 4, 8, 12, 10, 67, 97, 108, 105, 102, 111, 114, 110, 105, 97, 49, 22, 48, 20, 6, 3, 85, 4, 7, 12, 13, 83, 97, 110, 32, 70, 114, 97, 110, 99, 105, 115, 99, 111, 49, 19, 48, 17, 6, 3, 85, 4, 10, 12, 10, 77, 121, 32, 99, 111, 109, 112, 97, 110, 121, 49, 20, 48, 18, 6, 3, 85, 4, 11, 12, 11, 77, 121, 32, 68, 105, 118, 105, 115, 105, 111, 110, 49, 19, 48, 17, 6, 3, 85, 4, 3, 12, 10, 77, 121, 32, 82, 111, 111, 116, 32, 67, 65, 48, 30, 23, 13, 50, 52, 48, 54, 50, 56, 49, 50, 48, 49, 51, 51, 90, 23, 13, 51, 52, 48, 54, 50, 54, 49, 50, 48, 49, 51, 51, 90, 48, 122, 49, 11, 48, 9, 6, 3, 85, 4, 6, 19, 2, 85, 83, 49, 19, 48, 17, 6, 3, 85, 4, 8, 12, 10, 67, 97, 108, 105, 102, 111, 114, 110, 105, 97, 49, 22, 48, 20, 6, 3, 85, 4, 7, 12, 13, 83, 97, 110, 32, 70, 114, 97, 110, 99, 105, 115, 99, 111, 49, 19, 48, 17, 6, 3, 85, 4, 10, 12, 10, 77, 121, 32, 99, 111, 109, 112, 97, 110, 121, 49, 20, 48, 18, 6, 3, 85, 4, 11, 12, 11, 77, 121, 32, 68, 105, 118, 105, 115, 105, 111, 110, 49, 19, 48, 17, 6, 3, 85, 4, 3, 12, 10, 77, 121, 32, 82, 111, 111, 116, 32, 67, 65, 48, 130, 2, 34, 48, 13, 6, 9, 42, 134, 72, 134, 247, 13, 1, 1, 1, 5, 0, 3, 130, 2, 15, 0, 48, 130, 2, 10, 2, 130, 2, 1, 0, 186, 124, 93, 8, 24, 222, 114, 245, 123, 232, 56, 52, 146, 140, 12, 144, 138, 129, 220, 137, 188, 53, 135, 12, 106, 224, 166, 5, 255, 104, 165, 21, 123, 197, 138, 207, 192, 104, 216, 151, 107, 253, 161, 21, 116, 61, 91, 170, 224, 40, 173, 39, 213, 127, 76, 143, 59, 89, 168, 245, 178, 51, 23, 165, 30, 50, 185, 20, 137, 59, 180, 176, 186, 189, 87, 28, 44, 66, 18, 76, 130, 38, 246, 63, 129, 197, 140, 89, 72, 104, 171, 97, 49, 15, 251, 65, 11, 88, 160, 192, 222, 246, 23, 76, 56, 76, 49, 106, 127, 51, 148, 113, 226, 134, 181, 247, 5, 102, 254, 93, 101, 129, 155, 243, 255, 118, 167, 253, 93, 251, 226, 190, 56, 235, 33, 133, 230, 8, 76, 160, 19, 60, 136, 96, 239, 219, 170, 170, 162, 136, 215, 183, 149, 15, 111, 188, 94, 92, 237, 226, 115, 156, 160, 85, 83, 204, 4, 5, 243, 187, 154, 82, 175, 201, 147, 228, 248, 93, 61, 41, 182, 71, 84, 196, 43, 62, 111, 110, 187, 55, 168, 116, 116, 188, 50, 107, 103, 51, 15, 0, 243, 73, 101, 75, 218, 73, 153, 227, 29, 103, 4, 201, 123, 166, 251, 165, 14, 172, 31, 26, 180, 121, 192, 180, 254, 239, 186, 16, 29, 210, 146, 17, 231, 165, 111, 128, 149, 89, 244, 221, 162, 183, 24, 101, 22, 55, 102, 106, 205, 231, 237, 212, 109, 63, 13, 248, 116, 153, 227, 3, 52, 81, 83, 50, 202, 65, 157, 243, 64, 250, 26, 155, 67, 131, 208, 227, 192, 41, 237, 142, 203, 13, 13, 238, 25, 26, 22, 146, 22, 207, 64, 30, 134, 60, 249, 218, 90, 40, 34, 140, 61, 165, 216, 134, 86, 64, 152, 28, 94, 52, 163, 194, 4, 228, 184, 26, 101, 231, 28, 21, 159, 130, 130, 139, 232, 173, 107, 249, 95, 130, 105, 49, 186, 153, 78, 181, 18, 43, 145, 76, 0, 143, 255, 228, 28, 158, 253, 69, 227, 238, 23, 28, 14, 17, 137, 234, 225, 107, 76, 167, 143, 245, 31, 82, 140, 222, 187, 241, 196, 96, 99, 110, 36, 43, 73, 46, 122, 76, 123, 81, 105, 63, 210, 137, 37, 10, 203, 57, 131, 244, 34, 3, 53, 121, 7, 186, 249, 13, 130, 191, 226, 165, 184, 48, 44, 177, 107, 93, 134, 37, 209, 10, 107, 13, 37, 99, 21, 163, 175, 26, 5, 220, 51, 157, 80, 184, 50, 249, 245, 179, 139, 8, 128, 78, 237, 154, 230, 150, 46, 130, 67, 196, 175, 92, 113, 55, 77, 23, 235, 180, 196, 98, 159, 33, 124, 42, 32, 109, 149, 83, 49, 128, 111, 88, 166, 21, 94, 238, 99, 171, 73, 65, 72, 89, 208, 94, 167, 194, 21, 109, 121, 4, 187, 251, 164, 252, 254, 1, 14, 183, 103, 223, 194, 230, 154, 222, 94, 130, 205, 235, 37, 104, 116, 41, 124, 49, 113, 162, 89, 106, 241, 59, 2, 3, 1, 0, 1, 48, 13, 6, 9, 42, 134, 72, 134, 247, 13, 1, 1, 11, 5, 0, 3, 130, 2, 1, 0, 94, 70, 175, 129, 48, 235, 121, 13, 75, 76, 40, 115, 68, 220, 55, 29, 66, 106, 118, 148, 88, 80, 115, 201, 188, 71, 171, 29, 91, 202, 33, 201, 102, 183, 90, 5, 122, 108, 67, 67, 56, 250, 164, 173, 227, 249, 192, 57, 112, 186, 156, 64, 165, 135, 183, 154, 138, 109, 254, 16, 13, 167, 234, 43, 180, 172, 145, 105, 161, 231, 158, 39, 227, 177, 168, 196, 229, 204, 173, 115, 2, 28, 88, 2, 241, 27, 118, 107, 120, 132, 94, 82, 245, 56, 32, 196, 118, 171, 150, 116, 14, 112, 0, 94, 222, 65, 189, 8, 179, 223, 5, 109, 192, 105, 49, 64, 30, 216, 80, 159, 115, 161, 14, 236, 105, 79, 149, 184, 148, 193, 191, 21, 136, 213, 148, 253, 156, 157, 124, 129, 244, 119, 73, 46, 73, 74, 237, 67, 242, 51, 64, 55, 82, 180, 114, 21, 156, 221, 12, 99, 186, 93, 141, 28, 153, 242, 212, 11, 4, 178, 55, 190, 222, 10, 13, 138, 232, 53, 253, 100, 69, 212, 199, 3, 150, 27, 58, 173, 50, 173, 208, 175, 11, 164, 136, 78, 212, 177, 164, 73, 133, 74, 180, 145, 21, 177, 132, 176, 160, 144, 107, 127, 48, 86, 18, 68, 203, 152, 34, 20, 32, 161, 230, 240, 18, 112, 164, 147, 162, 167, 212, 35, 38, 194, 249, 93, 213, 80, 99, 4, 241, 182, 163, 75, 70, 246, 230, 103, 199, 58, 48, 3, 156, 211, 54, 182, 91, 181, 122, 146, 178, 78, 1, 196, 41, 147, 118, 114, 84, 214, 64, 155, 244, 244, 79, 239, 99, 101, 62, 139, 10, 60, 229, 106, 235, 24, 134, 119, 210, 142, 3, 59, 158, 57, 171, 125, 127, 233, 239, 155, 73, 42, 78, 62, 15, 201, 113, 92, 97, 67, 229, 210, 73, 89, 236, 233, 160, 35, 92, 89, 227, 65, 54, 11, 21, 157, 189, 46, 156, 146, 148, 248, 119, 11, 88, 214, 190, 56, 225, 178, 125, 176, 226, 173, 47, 147, 242, 61, 236, 242, 114, 100, 108, 194, 112, 0, 108, 9, 223, 113, 180, 196, 122, 183, 149, 214, 103, 153, 153, 149, 147, 138, 26, 233, 253, 36, 70, 83, 197, 180, 183, 119, 37, 196, 0, 246, 55, 154, 20, 31, 161, 109, 249, 150, 229, 56, 64, 113, 185, 229, 145, 79, 205, 70, 253, 80, 80, 60, 141, 249, 73, 14, 46, 114, 95, 223, 163, 217, 125, 237, 173, 234, 76, 30, 183, 36, 239, 127, 50, 144, 171, 168, 149, 3, 64, 116, 235, 139, 77, 225, 76, 149, 146, 9, 102, 219, 151, 247, 148, 76, 249, 215, 65, 139, 55, 108, 21, 236, 105, 97, 159, 137, 37, 7, 6, 205, 92, 26, 81, 13, 235, 17, 75, 78, 243, 33, 247, 72, 139, 219, 72, 72, 162, 84, 214, 3, 120, 198, 82, 126, 0, 180, 210, 74, 40, 232, 217, 169, 90, 60, 93, 165, 55, 147, 90, 2, 0, 96, 199, 84, 53, 37];
             if self.certs.len() > 0 {
-                for file_path in self.certs {
-                    let cert_file = File::open(file_path).unwrap();
-                    let mut buff_reader = BufReader::new(cert_file);
-                    let mut cert = vec![];
-                    buff_reader.read_to_end(&mut cert).unwrap();
-                    root_store.add(CertificateDer::from(cert)).unwrap();
-                }
+                let c = CertificateDer::from(cert);
+                root_store.add(c).unwrap();
+                // for file_path in self.certs {
+                //     let cert_file = File::open(file_path).unwrap();
+                //     let mut buff_reader = BufReader::new(cert_file);
+                //     let mut cert = vec![];
+                //     buff_reader.read_to_end(&mut cert).unwrap();
+                //     root_store.add(CertificateDer::from(cert)).unwrap();
+                // }
             } else {
                 root_store = rustls::RootCertStore {
-                    roots: webpki_roots::TLS_SERVER_ROOTS.iter().cloned().collect()
+                    roots: TLS_SERVER_ROOTS.iter().cloned().collect()
                 };
             }
     
             let config = rustls::ClientConfig::builder()
                 .with_root_certificates(root_store)
                 .with_no_client_auth();
-    
-            // Allow using SSLKEYLOGFILE
-            // config.key_log = Arc::new(rustls::KeyLogFile::new());
     
             let server_name: ServerName = host.try_into().unwrap();
             let conn = rustls::ClientConnection::new(Arc::new(config), server_name).unwrap();
@@ -516,6 +526,8 @@ impl<'ws, T> WSClient<'ws, T> where T: Clone {
                 return Ok(false);
 
             } else {
+                println!("Error: {}", error);
+                println!("Error Kind: {}", error.kind());
                 return Err(WebSocketError::IOError);
             }
         }

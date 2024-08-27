@@ -24,7 +24,7 @@ fn on_message(_ws: &mut WebSocket, _msg: &String, data: Option<WSData>) {
     let data = data.unwrap();
     data.borrow_mut().count += 1;
     println!("[SERVER]: {}", _msg);
-    _ws.send("Hello world");
+    // _ws.send("Hello world");
 }
 
 fn on_connect(ws: &mut WebSocket, _msg: &Option<String>, _data: Option<WSData>) {
@@ -57,7 +57,10 @@ fn on_close(reason: &Reason, _data: Option<WSData>) {
 }
 
 fn main() -> WebSocketResult<()> {
-    let url = "wss://echo.websocket.org/";
+    // let url = "wss://example.com:3000/";
+    let url = "wss://echo.websocket.org/.ws";
+    // let url = "wss://echo.websocket.org/.sse";
+    
 
     let mut client = WSClient::<WSData>::new();
     let data = Rc::new(RefCell::new(Data { count: 0 }));
@@ -66,7 +69,8 @@ fn main() -> WebSocketResult<()> {
         callback: Some(websocket_handler), 
         data: Some(data.clone()),
         protocols: &["chat", "superchat"],
-        certs: &[]
+        certs: &["certs/rootCA/cert.der"]
+        // certs: &[]
     };
 
     client.init(url, Some(config))?;
