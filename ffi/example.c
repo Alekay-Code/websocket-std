@@ -12,6 +12,7 @@
 int total = 0;
 int active = TRUE;
 
+
 void ws_handler(WSSClient_t* client, RustEvent rs_event, void* data) {
     // This function is required because the rust events are not compatible with C.
     // It will return a WSEvent_t struct compatible with C.
