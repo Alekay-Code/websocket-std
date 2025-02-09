@@ -23,9 +23,9 @@ Websocket implementation using std support, focus on microcontrollers and intero
 categories = ["embedded"]
 keywords = ["http", "async", "web"]
 
-# [lib]
-# name = "websocket_std"
-# crate-type = ["staticlib"]
+[lib]
+name = "websocket_std"
+crate-type = ["rlib", "staticlib"]
 
 [dependencies]
 bitflags = "2.3.2"
